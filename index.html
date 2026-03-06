@@ -1,28 +1,32 @@
 <!DOCTYPE html>
 <!--
   ============================================================
-   MACROPAD v3 — Web Serial Configuration Dashboard
-   RP2040-Zero · 2 Keys · Up to 8000 Hz Internal Scan
+   MACROPAD v4 — Web Serial Configuration Dashboard
+   RP2040-Zero · 2 Keys · Chord Macro · RGB LED
   ============================================================
 
-  SETUP INSTRUCTIONS
-  ------------------
-  1. Open in Google Chrome (v89+) or Microsoft Edge.
-     Web Serial API is NOT supported in Firefox or Safari.
-  2. Flash macropad_rp2040.ino to your RP2040 board first.
-  3. Plug in the board via USB.
-  4. Click "Connect Device" and select the COM port.
-  5. Configure, then click "Save to Device".
+  SETUP
+  -----
+  1. Open in Chrome (v89+) or Edge. Not supported in Firefox/Safari.
+  2. Flash macropad_rp2040.ino to your board first.
+  3. Install "Adafruit NeoPixel" library in Arduino IDE.
+  4. Plug in board, click "Connect Device", select COM port.
+  5. Configure, then "Save to Device".
 
   SERIAL PROTOCOL
   ---------------
-  0x01 [keycode]  → set key 1 binding
-  0x02 [rate_id]  → set rate (0=125Hz … 6=8000Hz)
-  0x03 [ms]       → set debounce (0–10ms)
-  0x04 [keycode]  → set key 2 binding
-  0xFF            → request config dump
-  Device replies: 0xAA=ACK, 0xEE=NACK,
-                  0xFE [k1][k2][rate][deb][0x00]=dump (5 bytes)
+  0x01 [k]   → key 1 binding
+  0x02 [r]   → rate ID (0–6)
+  0x03 [d]   → lockout ms (0–10)
+  0x04 [n]   → macro count (1–4)
+  0x05–0x08  → macro key slots 0–3
+  0x10 [m]   → LED mode (0–6)
+  0x11 [b]   → LED brightness
+  0x12 [s]   → LED speed (ms/step)
+  0x13–0x15  → LED R, G, B
+  0xFF       → config dump
+  Reply: 0xAA=ACK, 0xEE=NACK,
+         0xFE [k1][mCnt][mk0..mk3][rate][deb][lMode][lBri][lSpd][lR][lG][lB][0]=dump (16 bytes)
 -->
 <html lang="en">
 <head>
@@ -33,19 +37,19 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:       #0a0a0c;
-      --surface:  #111116;
-      --panel:    #16161d;
-      --border:   #2a2a38;
-      --accent:   #7c5cfc;
-      --accent2:  #c45cfc;
-      --glow:     rgba(124, 92, 252, 0.35);
-      --text:     #d4d4e8;
-      --muted:    #5a5a72;
-      --ok:       #3de88e;
-      --warn:     #f0c040;
-      --err:      #f05060;
-      --font:     'Courier New', Courier, monospace;
+      --bg:      #0a0a0c;
+      --surface: #111116;
+      --panel:   #16161d;
+      --border:  #2a2a38;
+      --accent:  #7c5cfc;
+      --accent2: #c45cfc;
+      --glow:    rgba(124,92,252,0.35);
+      --text:    #d4d4e8;
+      --muted:   #5a5a72;
+      --ok:      #3de88e;
+      --warn:    #f0c040;
+      --err:     #f05060;
+      --font:    'Courier New', Courier, monospace;
     }
 
     html, body {
@@ -59,95 +63,65 @@
 
     body::before {
       content: '';
-      position: fixed;
-      inset: 0;
+      position: fixed; inset: 0;
       background: repeating-linear-gradient(
         0deg, transparent, transparent 2px,
         rgba(0,0,0,0.18) 2px, rgba(0,0,0,0.18) 4px
       );
-      pointer-events: none;
-      z-index: 0;
+      pointer-events: none; z-index: 0;
     }
-
     body::after {
       content: '';
-      position: fixed;
-      inset: 0;
+      position: fixed; inset: 0;
       background-image:
         linear-gradient(rgba(124,92,252,0.03) 1px, transparent 1px),
         linear-gradient(90deg, rgba(124,92,252,0.03) 1px, transparent 1px);
       background-size: 40px 40px;
-      pointer-events: none;
-      z-index: 0;
+      pointer-events: none; z-index: 0;
     }
 
-    /* ── Screens ─────────────────────────────────────────── */
+    /* ── Screens ──────────────────────────────────────────── */
     .screen {
-      position: fixed;
-      inset: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
       z-index: 1;
       transition: opacity 0.4s ease, transform 0.4s ease;
     }
     .screen.hidden { opacity: 0; pointer-events: none; transform: scale(0.97); }
 
-    /* ── Landing ─────────────────────────────────────────── */
+    /* ── Landing ──────────────────────────────────────────── */
     #landing { flex-direction: column; gap: 28px; text-align: center; }
-
     .logo-area { display: flex; flex-direction: column; align-items: center; gap: 12px; }
-
     .logo-icon {
       width: 64px; height: 64px;
-      border: 2px solid var(--accent);
-      border-radius: 12px;
+      border: 2px solid var(--accent); border-radius: 12px;
       display: flex; align-items: center; justify-content: center;
       font-size: 28px;
       box-shadow: 0 0 24px var(--glow), inset 0 0 16px rgba(124,92,252,0.1);
       animation: pulse-border 2.4s ease-in-out infinite;
     }
-
     @keyframes pulse-border {
-      0%, 100% { box-shadow: 0 0 16px var(--glow), inset 0 0 12px rgba(124,92,252,0.1); }
-      50%       { box-shadow: 0 0 36px rgba(124,92,252,0.55), inset 0 0 20px rgba(124,92,252,0.18); }
+      0%,100% { box-shadow: 0 0 16px var(--glow), inset 0 0 12px rgba(124,92,252,0.1); }
+      50%      { box-shadow: 0 0 36px rgba(124,92,252,0.55), inset 0 0 20px rgba(124,92,252,0.18); }
     }
-
     .product-name {
-      font-size: 42px;
-      font-weight: bold;
-      letter-spacing: 0.25em;
+      font-size: 42px; font-weight: bold; letter-spacing: 0.25em;
       background: linear-gradient(135deg, var(--accent), var(--accent2));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
     }
-
     .tagline { color: var(--muted); letter-spacing: 0.15em; font-size: 11px; text-transform: uppercase; }
 
     .btn-connect {
-      position: relative;
-      padding: 14px 44px;
-      background: transparent;
-      border: 1.5px solid var(--accent);
-      border-radius: 6px;
-      color: var(--accent);
-      font-family: var(--font);
-      font-size: 13px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      box-shadow: 0 0 20px var(--glow);
-      overflow: hidden;
+      position: relative; padding: 14px 44px;
+      background: transparent; border: 1.5px solid var(--accent); border-radius: 6px;
+      color: var(--accent); font-family: var(--font); font-size: 13px;
+      letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer;
+      transition: all 0.2s; box-shadow: 0 0 20px var(--glow); overflow: hidden;
     }
     .btn-connect::before {
-      content: '';
-      position: absolute;
-      inset: 0;
+      content: ''; position: absolute; inset: 0;
       background: linear-gradient(135deg, rgba(124,92,252,0.12), rgba(196,92,252,0.08));
-      opacity: 0;
-      transition: opacity 0.2s ease;
+      opacity: 0; transition: opacity 0.2s;
     }
     .btn-connect:hover { color: #fff; border-color: var(--accent2); box-shadow: 0 0 32px rgba(196,92,252,0.5); }
     .btn-connect:hover::before { opacity: 1; }
@@ -156,222 +130,203 @@
 
     .status-dot { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; letter-spacing: 0.1em; }
     .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); transition: background 0.3s, box-shadow 0.3s; }
-    .dot.ok   { background: var(--ok);  box-shadow: 0 0 8px var(--ok); }
-    .dot.err  { background: var(--err); box-shadow: 0 0 8px var(--err); }
-    .dot.warn { background: var(--warn);box-shadow: 0 0 8px var(--warn); }
+    .dot.ok   { background: var(--ok);   box-shadow: 0 0 8px var(--ok); }
+    .dot.err  { background: var(--err);  box-shadow: 0 0 8px var(--err); }
+    .dot.warn { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
 
-    /* ── Config screen ───────────────────────────────────── */
+    /* ── Config screen ────────────────────────────────────── */
     #config {
-      flex-direction: column;
-      align-items: stretch;
-      padding: 24px;
-      gap: 0;
-      max-width: 580px;
-      width: 100%;
+      flex-direction: column; align-items: stretch;
+      padding: 24px; gap: 0;
+      max-width: 580px; width: 100%;
+      max-height: 100%; overflow-y: auto;
     }
+    #config::-webkit-scrollbar { width: 4px; }
+    #config::-webkit-scrollbar-track { background: transparent; }
+    #config::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
     .cfg-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 20px;
-      padding-bottom: 14px;
-      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 20px; padding-bottom: 14px; border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
     }
-
     .cfg-title {
-      font-size: 16px;
-      letter-spacing: 0.18em;
+      font-size: 16px; letter-spacing: 0.18em;
       background: linear-gradient(135deg, var(--accent), var(--accent2));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
     }
-
     .btn-disconnect {
-      background: none;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      color: var(--muted);
-      font-family: var(--font);
-      font-size: 10px;
-      letter-spacing: 0.1em;
-      padding: 5px 12px;
-      cursor: pointer;
-      text-transform: uppercase;
-      transition: all 0.2s;
+      background: none; border: 1px solid var(--border); border-radius: 4px;
+      color: var(--muted); font-family: var(--font); font-size: 10px;
+      letter-spacing: 0.1em; padding: 5px 12px; cursor: pointer;
+      text-transform: uppercase; transition: all 0.2s;
     }
     .btn-disconnect:hover { border-color: var(--err); color: var(--err); }
 
-    /* ── Panels ──────────────────────────────────────────── */
+    /* ── Panels ───────────────────────────────────────────── */
     .panel {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 18px 20px;
-      margin-bottom: 12px;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px; padding: 18px 20px; margin-bottom: 12px;
     }
-
     .panel-label {
-      font-size: 9px;
-      letter-spacing: 0.2em;
-      text-transform: uppercase;
-      color: var(--muted);
-      margin-bottom: 14px;
+      font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase;
+      color: var(--muted); margin-bottom: 14px;
     }
 
-    /* ── Two-key binding layout ──────────────────────────── */
-    .key-pair {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-    }
-
-    .key-col { display: flex; flex-direction: column; gap: 0; }
-
+    /* ── Key bindings ─────────────────────────────────────── */
+    .key-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .key-col  { display: flex; flex-direction: column; gap: 0; }
     .key-sub-label {
-      font-size: 8px;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: var(--muted);
-      margin-bottom: 6px;
+      font-size: 8px; letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--muted); margin-bottom: 6px;
     }
-
     .key-capture-row { display: flex; gap: 6px; align-items: stretch; }
     .key-capture-row .key-capture { flex: 1; }
 
     .key-capture {
-      width: 100%;
-      min-height: 52px;
-      border: 1.5px dashed var(--border);
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      transition: all 0.2s;
-      background: var(--surface);
-      font-size: 17px;
-      letter-spacing: 0.1em;
-      color: var(--text);
-      user-select: none;
+      width: 100%; min-height: 52px;
+      border: 1.5px dashed var(--border); border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: all 0.2s;
+      background: var(--surface); font-size: 14px;
+      letter-spacing: 0.05em; color: var(--text); user-select: none;
+      text-align: center; padding: 6px;
     }
     .key-capture.listening {
-      border-color: var(--accent);
-      box-shadow: 0 0 18px var(--glow);
-      color: var(--accent);
-      animation: blink-border 0.8s linear infinite;
+      border-color: var(--accent); box-shadow: 0 0 18px var(--glow);
+      color: var(--accent); animation: blink-border 0.8s linear infinite;
     }
     @keyframes blink-border { 50% { border-color: var(--accent2); } }
     .key-capture .hint { font-size: 9px; color: var(--muted); letter-spacing: 0.07em; }
     .key-hex { font-size: 9px; color: var(--muted); margin-top: 5px; text-align: right; }
 
-    /* Test button (sits inside key-capture-row for key 1) */
+    /* Chord key chips */
+    .chord-display { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: center; }
+    .chord-key {
+      background: rgba(124,92,252,0.18); border: 1px solid var(--accent);
+      border-radius: 4px; padding: 2px 7px; font-size: 12px;
+      color: var(--text); letter-spacing: 0.04em;
+    }
+    .chord-plus { color: var(--muted); font-size: 10px; }
+
+    /* Test button */
     .btn-test {
-      padding: 0 10px;
-      background: transparent;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--muted);
-      font-family: var(--font);
-      font-size: 9px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      cursor: pointer;
-      transition: all 0.2s;
-      white-space: nowrap;
-      align-self: stretch;
-      flex-shrink: 0;
+      padding: 0 10px; background: transparent; border: 1px solid var(--border);
+      border-radius: 6px; color: var(--muted); font-family: var(--font);
+      font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+      cursor: pointer; transition: all 0.2s; white-space: nowrap;
+      align-self: stretch; flex-shrink: 0;
     }
     .btn-test:hover { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 10px var(--glow); }
     .btn-test:disabled { opacity: 0.4; cursor: not-allowed; }
 
-    /* ── Rate slider — 7 positions ───────────────────────── */
+    /* ── Rate slider ──────────────────────────────────────── */
     .rate-track { height: 44px; display: flex; align-items: center; }
-
-    .rate-labels {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 8px;
-    }
+    .rate-labels { display: flex; justify-content: space-between; margin-top: 8px; }
     .rate-labels span {
-      font-size: 8px;
-      color: var(--muted);
-      text-align: center;
-      width: calc(100% / 7);
-      transition: color 0.25s, text-shadow 0.25s;
+      font-size: 8px; color: var(--muted); text-align: center;
+      width: calc(100% / 7); transition: color 0.25s, text-shadow 0.25s;
     }
     .rate-label-active { color: var(--ok) !important; text-shadow: 0 0 10px rgba(61,232,142,0.55); }
-
     @keyframes flash-label {
       0%   { color: #fff; text-shadow: 0 0 20px var(--ok); }
       100% { color: var(--ok); text-shadow: 0 0 10px rgba(61,232,142,0.55); }
     }
     .rate-label-flash { animation: flash-label 0.7s ease-out forwards; }
-
-    /* HIGH PERFORMANCE badge */
-    #rate-perf-badge {
-      display: none;
-      margin-top: 8px;
-      font-size: 9px;
-      letter-spacing: 0.14em;
-      color: var(--ok);
-      text-align: center;
-    }
+    #rate-perf-badge { display: none; margin-top: 8px; font-size: 9px; letter-spacing: 0.14em; color: var(--ok); text-align: center; }
     #rate-perf-badge.visible { display: block; }
 
     input[type=range] {
-      -webkit-appearance: none;
-      appearance: none;
-      width: 100%;
-      height: 3px;
-      background: var(--border);
-      border-radius: 2px;
-      outline: none;
+      -webkit-appearance: none; appearance: none;
+      width: 100%; height: 3px;
+      background: var(--border); border-radius: 2px; outline: none;
     }
     input[type=range]::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 18px; height: 18px;
-      border-radius: 50%;
-      background: var(--accent);
-      cursor: pointer;
-      box-shadow: 0 0 10px var(--glow);
-      border: 2px solid var(--bg);
+      -webkit-appearance: none; width: 18px; height: 18px;
+      border-radius: 50%; background: var(--accent); cursor: pointer;
+      box-shadow: 0 0 10px var(--glow); border: 2px solid var(--bg);
       transition: background 0.2s, box-shadow 0.2s;
     }
     input[type=range]::-webkit-slider-thumb:hover {
-      background: var(--accent2);
-      box-shadow: 0 0 18px rgba(196,92,252,0.6);
+      background: var(--accent2); box-shadow: 0 0 18px rgba(196,92,252,0.6);
     }
 
-    /* ── Debounce ────────────────────────────────────────── */
+    /* ── Debounce ─────────────────────────────────────────── */
     .num-row { display: flex; align-items: center; gap: 12px; }
-
     input[type=number] {
-      width: 80px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      color: var(--text);
-      font-family: var(--font);
-      font-size: 16px;
-      padding: 8px 12px;
-      text-align: center;
-      outline: none;
+      width: 80px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 4px; color: var(--text); font-family: var(--font);
+      font-size: 16px; padding: 8px 12px; text-align: center; outline: none;
       transition: border-color 0.2s, box-shadow 0.2s;
     }
     input[type=number]:focus { border-color: var(--accent); box-shadow: 0 0 10px var(--glow); }
-    .num-unit { color: var(--muted); font-size: 11px; }
+    .num-unit  { color: var(--muted); font-size: 11px; }
     #debounce-hint { font-size: 10px; color: var(--ok); letter-spacing: 0.06em; margin-left: 6px; }
     #debounce-warn { display: none; margin-top: 8px; font-size: 9px; letter-spacing: 0.08em; color: var(--warn); }
 
-    /* ── Status grid — 2×2 ───────────────────────────────── */
-    .status-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
+    /* ── RGB LED panel ────────────────────────────────────── */
+    .led-modes {
+      display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 16px;
+    }
+    .led-mode-btn {
+      padding: 5px 10px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 4px;
+      color: var(--muted); font-family: var(--font); font-size: 9px;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      cursor: pointer; transition: all 0.18s; white-space: nowrap;
+    }
+    .led-mode-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .led-mode-btn.active {
+      border-color: var(--accent); color: var(--accent);
+      background: rgba(124,92,252,0.15);
+      box-shadow: 0 0 10px var(--glow);
     }
 
+    .led-row {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+    }
+    .led-label {
+      font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase;
+      color: var(--muted); width: 28px; flex-shrink: 0;
+    }
+    .led-val {
+      font-size: 10px; color: var(--text);
+      width: 44px; text-align: right; flex-shrink: 0;
+    }
+    .led-row input[type=range] { flex: 1; }
+
+    .led-color-section { margin-top: 4px; }
+    .led-color-row { display: flex; gap: 14px; align-items: flex-start; }
+    .color-swatch {
+      width: 48px; height: 48px; border-radius: 8px;
+      border: 1px solid var(--border); flex-shrink: 0;
+      transition: background 0.15s;
+      box-shadow: 0 0 12px rgba(0,0,0,0.4);
+    }
+    .color-sliders { flex: 1; }
+
+    .led-section-sep {
+      height: 1px; background: var(--border);
+      margin: 12px 0;
+    }
+
+    .led-color-note {
+      font-size: 9px; color: var(--muted); letter-spacing: 0.06em;
+      margin-bottom: 10px;
+    }
+
+    .btn-preview {
+      padding: 7px 16px; background: transparent;
+      border: 1px solid var(--border); border-radius: 5px;
+      color: var(--muted); font-family: var(--font); font-size: 9px;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      cursor: pointer; transition: all 0.2s; margin-top: 4px;
+    }
+    .btn-preview:hover { border-color: var(--accent2); color: var(--accent2); box-shadow: 0 0 10px rgba(196,92,252,0.3); }
+    .btn-preview:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Status grid ──────────────────────────────────────── */
+    .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .stat-cell { background: var(--surface); border: 1px solid var(--border); border-radius: 5px; padding: 10px 12px; }
     .stat-key  { font-size: 8px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--muted); margin-bottom: 5px; }
     .stat-val  { font-size: 13px; color: var(--text); }
@@ -380,41 +335,27 @@
     .stat-val.err  { color: var(--err); }
     .stat-sub  { font-size: 9px; color: var(--muted); margin-top: 3px; letter-spacing: 0.04em; font-family: var(--font); }
 
-    /* ── Save button ─────────────────────────────────────── */
+    /* ── Save button ──────────────────────────────────────── */
     .btn-save {
-      width: 100%;
-      padding: 14px;
+      width: 100%; padding: 14px;
       background: linear-gradient(135deg, rgba(124,92,252,0.15), rgba(196,92,252,0.1));
-      border: 1.5px solid var(--accent);
-      border-radius: 6px;
-      color: var(--accent);
-      font-family: var(--font);
-      font-size: 13px;
-      letter-spacing: 0.15em;
-      text-transform: uppercase;
-      cursor: pointer;
-      transition: all 0.2s;
-      margin-top: 4px;
+      border: 1.5px solid var(--accent); border-radius: 6px;
+      color: var(--accent); font-family: var(--font); font-size: 13px;
+      letter-spacing: 0.15em; text-transform: uppercase;
+      cursor: pointer; transition: all 0.2s; margin-top: 4px;
     }
     .btn-save:hover { background: linear-gradient(135deg, rgba(124,92,252,0.3), rgba(196,92,252,0.2)); box-shadow: 0 0 24px var(--glow); color: #fff; }
     .btn-save:active { transform: scale(0.99); }
     .btn-save:disabled { opacity: 0.4; cursor: not-allowed; }
 
-    /* ── Toast ───────────────────────────────────────────── */
+    /* ── Toast ────────────────────────────────────────────── */
     #toast {
-      position: fixed;
-      bottom: 24px;
-      left: 50%;
+      position: fixed; bottom: 24px; left: 50%;
       transform: translateX(-50%) translateY(80px);
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 10px 22px;
-      font-size: 11px;
-      letter-spacing: 0.1em;
-      z-index: 100;
-      transition: transform 0.3s ease, opacity 0.3s ease;
-      opacity: 0;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 6px; padding: 10px 22px; font-size: 11px;
+      letter-spacing: 0.1em; z-index: 100;
+      transition: transform 0.3s ease, opacity 0.3s ease; opacity: 0;
     }
     #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
     #toast.ok   { border-color: var(--ok);  color: var(--ok);  }
@@ -422,55 +363,47 @@
     #toast.warn { border-color: var(--warn);color: var(--warn);}
 
     .no-serial {
-      background: rgba(240,80,96,0.1);
-      border: 1px solid var(--err);
-      border-radius: 6px;
-      padding: 10px 16px;
-      color: var(--err);
-      font-size: 10px;
-      letter-spacing: 0.08em;
-      text-align: center;
+      background: rgba(240,80,96,0.1); border: 1px solid var(--err);
+      border-radius: 6px; padding: 10px 16px; color: var(--err);
+      font-size: 10px; letter-spacing: 0.08em; text-align: center;
     }
   </style>
 </head>
 <body>
 
-<!-- ── Landing Screen ──────────────────────────────────── -->
+<!-- ── Landing ─────────────────────────────────────────────── -->
 <div class="screen" id="landing">
   <div class="logo-area">
     <div class="logo-icon">⌨</div>
-    <div class="product-name">MACROPAD</div>
-    <div class="tagline">RP2040-Zero · 2-Key · WebSerial Dashboard</div>
+    <div class="product-name">SaHo Device</div>
+    <div class="tagline">Customizable Settings Page</div>
   </div>
-
   <div id="no-serial-warning" class="no-serial" style="display:none">
     Web Serial API not supported. Use Chrome or Edge (v89+).
   </div>
-
   <button class="btn-connect" id="btn-connect">Connect Device</button>
-
   <div class="status-dot">
     <div class="dot" id="land-dot"></div>
     <span id="land-status">Disconnected</span>
   </div>
 </div>
 
-<!-- ── Config Screen ───────────────────────────────────── -->
+<!-- ── Config ──────────────────────────────────────────────── -->
 <div class="screen hidden" id="config">
 
   <div class="cfg-header">
-    <div class="cfg-title">MACROPAD CONFIG</div>
+    <div class="cfg-title">SaHo Device CONFIG</div>
     <button class="btn-disconnect" id="btn-disconnect">Disconnect</button>
   </div>
 
-  <!-- Key Bindings — two side-by-side -->
+  <!-- Key Bindings -->
   <div class="panel">
     <div class="panel-label">Key Bindings</div>
     <div class="key-pair">
 
-      <!-- Key 1 -->
+      <!-- Key 1: single keycode -->
       <div class="key-col">
-        <div class="key-sub-label">Key 1 — GP1</div>
+        <div class="key-sub-label">Key 1 — GP1 (single key)</div>
         <div class="key-capture-row">
           <div class="key-capture" id="key-capture-1" tabindex="0">
             <span class="hint">Click to capture…</span>
@@ -480,19 +413,19 @@
         <div class="key-hex" id="key-hex-1">HEX: —</div>
       </div>
 
-      <!-- Key 2 -->
+      <!-- Key 2: chord macro -->
       <div class="key-col">
-        <div class="key-sub-label">Key 2 — GP2</div>
+        <div class="key-sub-label">Key 2 — GP6 (chord macro)</div>
         <div class="key-capture" id="key-capture-2" tabindex="0">
-          <span class="hint">Click to capture…</span>
+          <span class="hint">Click, then hold combo + release all…</span>
         </div>
-        <div class="key-hex" id="key-hex-2">HEX: —</div>
+        <div class="key-hex" id="key-hex-2">MACRO: —</div>
       </div>
 
     </div>
   </div>
 
-  <!-- Polling Rate — 7 positions -->
+  <!-- Polling Rate -->
   <div class="panel">
     <div class="panel-label">Polling Rate</div>
     <div class="rate-track">
@@ -510,18 +443,76 @@
     <div id="rate-perf-badge">⚡ HIGH PERFORMANCE — Internal scan only · USB HID capped at 1000 Hz</div>
   </div>
 
-  <!-- Debounce -->
+  <!-- Debounce / Lockout -->
   <div class="panel">
-    <div class="panel-label">Debounce Time</div>
+    <div class="panel-label">Post-Press Lockout</div>
     <div class="num-row">
-      <input type="number" id="debounce-input" min="0" max="10" value="0">
+      <input type="number" id="debounce-input" min="0" max="10" value="5">
       <span class="num-unit">ms (0 – 10)</span>
-      <span id="debounce-hint">(instant)</span>
+      <span id="debounce-hint"></span>
     </div>
     <div id="debounce-warn"></div>
   </div>
 
-  <!-- Live Status — 2×2 grid -->
+  <!-- RGB LED -->
+  <div class="panel">
+    <div class="panel-label">RGB LED</div>
+
+    <!-- Mode selector -->
+    <div class="led-modes">
+      <button class="led-mode-btn" data-mode="0">Off</button>
+      <button class="led-mode-btn active" data-mode="1">Rainbow</button>
+      <button class="led-mode-btn" data-mode="2">Solid</button>
+      <button class="led-mode-btn" data-mode="3">Breathe</button>
+      <button class="led-mode-btn" data-mode="4">Reactive</button>
+      <button class="led-mode-btn" data-mode="5">Strobe</button>
+      <button class="led-mode-btn" data-mode="6">Hue Sweep</button>
+    </div>
+
+    <!-- Brightness -->
+    <div class="led-row">
+      <span class="led-label">Bri</span>
+      <input type="range" id="led-bri" min="0" max="255" value="200">
+      <span class="led-val" id="led-bri-val">200</span>
+    </div>
+
+    <!-- Speed (ms/step — lower = faster) -->
+    <div class="led-row">
+      <span class="led-label">Speed</span>
+      <input type="range" id="led-spd" min="1" max="200" value="20">
+      <span class="led-val" id="led-spd-val">20ms</span>
+    </div>
+
+    <!-- Color (shown for modes that use user color) -->
+    <div class="led-section-sep" id="led-sep"></div>
+    <div class="led-color-section" id="led-color-section">
+      <div class="led-color-note" id="led-color-note">Color used by: Solid, Breathe, Reactive, Strobe</div>
+      <div class="led-color-row">
+        <div class="color-swatch" id="color-swatch" style="background:#ff0000"></div>
+        <div class="color-sliders">
+          <div class="led-row">
+            <span class="led-label" style="color:#f05060">R</span>
+            <input type="range" id="led-r" min="0" max="255" value="255">
+            <span class="led-val" id="led-r-val">255</span>
+          </div>
+          <div class="led-row">
+            <span class="led-label" style="color:#3de88e">G</span>
+            <input type="range" id="led-g" min="0" max="255" value="0">
+            <span class="led-val" id="led-g-val">0</span>
+          </div>
+          <div class="led-row" style="margin-bottom:0">
+            <span class="led-label" style="color:#7c5cfc">B</span>
+            <input type="range" id="led-b" min="0" max="255" value="0">
+            <span class="led-val" id="led-b-val">0</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn-preview" id="btn-preview" disabled>⬡ Preview LED on Device</button>
+  </div>
+
+  <!-- Live Status -->
   <div class="panel">
     <div class="panel-label">Live Status</div>
     <div class="status-grid">
@@ -540,7 +531,7 @@
         <div class="stat-sub" id="stat-ack"></div>
       </div>
       <div class="stat-cell">
-        <div class="stat-key">Key 2</div>
+        <div class="stat-key">Key 2 Macro</div>
         <div class="stat-val" id="stat-key2">—</div>
       </div>
     </div>
@@ -548,128 +539,174 @@
 
   <!-- Save -->
   <button class="btn-save" id="btn-save">Save to Device</button>
-</div>
 
-<!-- ── Toast ───────────────────────────────────────────── -->
+</div><!-- /#config -->
+
 <div id="toast"></div>
 
 <script>
 'use strict';
 
-// ── Arduino / Earle Philhower Keyboard.h keycode map ─────
-// Maps browser KeyboardEvent.code → Arduino Keyboard.h byte value.
-// Compatible with both AVR Keyboard.h and Earle Philhower's Keyboard.h.
+// ── Arduino Keyboard.h keycode map (browser event.code → byte) ───────────────
 const KEY_MAP = {
-  KeyA:0x61, KeyB:0x62, KeyC:0x63, KeyD:0x64, KeyE:0x65,
-  KeyF:0x66, KeyG:0x67, KeyH:0x68, KeyI:0x69, KeyJ:0x6A,
-  KeyK:0x6B, KeyL:0x6C, KeyM:0x6D, KeyN:0x6E, KeyO:0x6F,
-  KeyP:0x70, KeyQ:0x71, KeyR:0x72, KeyS:0x73, KeyT:0x74,
-  KeyU:0x75, KeyV:0x76, KeyW:0x77, KeyX:0x78, KeyY:0x79,
-  KeyZ:0x7A,
-  Digit0:0x30, Digit1:0x31, Digit2:0x32, Digit3:0x33,
-  Digit4:0x34, Digit5:0x35, Digit6:0x36, Digit7:0x37,
-  Digit8:0x38, Digit9:0x39,
-  Numpad0:0x30, Numpad1:0x31, Numpad2:0x32, Numpad3:0x33,
-  Numpad4:0x34, Numpad5:0x35, Numpad6:0x36, Numpad7:0x37,
-  Numpad8:0x38, Numpad9:0x39,
-  NumpadEnter:0xB0, NumpadDecimal:0x2E, NumpadAdd:0x2B,
-  NumpadSubtract:0x2D, NumpadMultiply:0x2A, NumpadDivide:0x2F,
-  Space:0x20, Enter:0xB0, Backspace:0xB2, Tab:0xB3,
-  Escape:0xB1, Delete:0xD4, Insert:0xD1,
-  Home:0xD2, End:0xD5, PageUp:0xD3, PageDown:0xD6,
-  ArrowUp:0xDA, ArrowDown:0xD9, ArrowLeft:0xD8, ArrowRight:0xD7,
+  KeyA:0x61,KeyB:0x62,KeyC:0x63,KeyD:0x64,KeyE:0x65,
+  KeyF:0x66,KeyG:0x67,KeyH:0x68,KeyI:0x69,KeyJ:0x6A,
+  KeyK:0x6B,KeyL:0x6C,KeyM:0x6D,KeyN:0x6E,KeyO:0x6F,
+  KeyP:0x70,KeyQ:0x71,KeyR:0x72,KeyS:0x73,KeyT:0x74,
+  KeyU:0x75,KeyV:0x76,KeyW:0x77,KeyX:0x78,KeyY:0x79,KeyZ:0x7A,
+  Digit0:0x30,Digit1:0x31,Digit2:0x32,Digit3:0x33,
+  Digit4:0x34,Digit5:0x35,Digit6:0x36,Digit7:0x37,
+  Digit8:0x38,Digit9:0x39,
+  Numpad0:0x30,Numpad1:0x31,Numpad2:0x32,Numpad3:0x33,
+  Numpad4:0x34,Numpad5:0x35,Numpad6:0x36,Numpad7:0x37,
+  Numpad8:0x38,Numpad9:0x39,
+  NumpadEnter:0xB0,NumpadDecimal:0x2E,NumpadAdd:0x2B,
+  NumpadSubtract:0x2D,NumpadMultiply:0x2A,NumpadDivide:0x2F,
+  Space:0x20,Enter:0xB0,Backspace:0xB2,Tab:0xB3,
+  Escape:0xB1,Delete:0xD4,Insert:0xD1,
+  Home:0xD2,End:0xD5,PageUp:0xD3,PageDown:0xD6,
+  ArrowUp:0xDA,ArrowDown:0xD9,ArrowLeft:0xD8,ArrowRight:0xD7,
   CapsLock:0xC1,
-  F1:0xC2,  F2:0xC3,  F3:0xC4,  F4:0xC5,
-  F5:0xC6,  F6:0xC7,  F7:0xC8,  F8:0xC9,
-  F9:0xCA,  F10:0xCB, F11:0xCC, F12:0xCD,
-  F13:0xF0, F14:0xF1, F15:0xF2, F16:0xF3,
-  F17:0xF4, F18:0xF5, F19:0xF6, F20:0xF7,
-  F21:0xF8, F22:0xF9, F23:0xFA, F24:0xFB,
-  ControlLeft:0x80,  ShiftLeft:0x81,  AltLeft:0x82,   MetaLeft:0x83,
-  ControlRight:0x84, ShiftRight:0x85, AltRight:0x86,  MetaRight:0x87,
-  Semicolon:0x3B, Equal:0x3D, Comma:0x2C, Minus:0x2D,
-  Period:0x2E, Slash:0x2F, Backquote:0x60,
-  BracketLeft:0x5B, Backslash:0x5C, BracketRight:0x5D, Quote:0x27,
+  F1:0xC2,F2:0xC3,F3:0xC4,F4:0xC5,F5:0xC6,F6:0xC7,
+  F7:0xC8,F8:0xC9,F9:0xCA,F10:0xCB,F11:0xCC,F12:0xCD,
+  F13:0xF0,F14:0xF1,F15:0xF2,F16:0xF3,F17:0xF4,F18:0xF5,
+  F19:0xF6,F20:0xF7,F21:0xF8,F22:0xF9,F23:0xFA,F24:0xFB,
+  ControlLeft:0x80,ShiftLeft:0x81,AltLeft:0x82,MetaLeft:0x83,
+  ControlRight:0x84,ShiftRight:0x85,AltRight:0x86,MetaRight:0x87,
+  Semicolon:0x3B,Equal:0x3D,Comma:0x2C,Minus:0x2D,
+  Period:0x2E,Slash:0x2F,Backquote:0x60,
+  BracketLeft:0x5B,Backslash:0x5C,BracketRight:0x5D,Quote:0x27,
 };
 
-// 7 rate positions matching the firmware's SCAN_INTERVAL_US array
-const RATE_HZ = ['125 Hz', '250 Hz', '500 Hz', '1000 Hz', '2000 Hz', '4000 Hz', '8000 Hz'];
+// Human-readable names for Arduino keycodes
+const BYTE_DISPLAY = {
+  0x80:'Ctrl', 0x81:'Shift', 0x82:'Alt', 0x83:'Win',
+  0x84:'RCtrl', 0x85:'RShift', 0x86:'RAlt', 0x87:'RWin',
+  0x20:'Space', 0xB0:'Enter', 0xB1:'Esc', 0xB2:'Bksp', 0xB3:'Tab',
+  0xC1:'Caps',
+  0xC2:'F1',0xC3:'F2',0xC4:'F3',0xC5:'F4',0xC6:'F5',0xC7:'F6',
+  0xC8:'F7',0xC9:'F8',0xCA:'F9',0xCB:'F10',0xCC:'F11',0xCD:'F12',
+  0xD1:'Ins',0xD2:'Home',0xD3:'PgUp',0xD4:'Del',0xD5:'End',0xD6:'PgDn',
+  0xD7:'→',0xD8:'←',0xD9:'↓',0xDA:'↑',
+  0xF0:'F13',0xF1:'F14',0xF2:'F15',0xF3:'F16',
+  0xF4:'F17',0xF5:'F18',0xF6:'F19',0xF7:'F20',
+};
 
-// ── Serial protocol constants ──────────────────────────────
-const CMD_SET_KEY1     = 0x01;
-const CMD_SET_RATE     = 0x02;
-const CMD_SET_DEBOUNCE = 0x03;
-const CMD_SET_KEY2     = 0x04;
-const CMD_DUMP         = 0xFF;
-const RESP_ACK         = 0xAA;
-const RESP_NACK        = 0xEE;
-const RESP_DUMP        = 0xFE;
+function byteToName(b) {
+  if (BYTE_DISPLAY[b]) return BYTE_DISPLAY[b];
+  if (b >= 0x21 && b <= 0x7E) return String.fromCharCode(b).toUpperCase();
+  return '0x' + b.toString(16).padStart(2,'0').toUpperCase();
+}
 
-// ── App state ─────────────────────────────────────────────
-let port         = null;
-let writer       = null;
-let readLoop     = null;
-let rxBuf        = [];        // Accumulator for multi-byte responses
-let capturedKey1 = null;      // { code, name, byte }
-let capturedKey2 = null;
-let listeningBox = -1;        // -1=none, 0=key1 box, 1=key2 box
+const RATE_HZ     = ['125 Hz','250 Hz','500 Hz','1000 Hz','2000 Hz','4000 Hz','8000 Hz'];
+const LED_NAMES   = ['Off','Rainbow','Solid','Breathe','Reactive','Strobe','Hue Sweep'];
+// Modes that use the user-set color (show color picker)
+const LED_USES_COLOR = new Set([2, 3, 4, 5]);
 
-// ── Elements ──────────────────────────────────────────────
-const $landing      = document.getElementById('landing');
-const $config       = document.getElementById('config');
-const $btnConnect   = document.getElementById('btn-connect');
-const $btnDisconn   = document.getElementById('btn-disconnect');
-const $btnSave      = document.getElementById('btn-save');
-const $btnTest      = document.getElementById('btn-test');
-const $landDot      = document.getElementById('land-dot');
-const $landStatus   = document.getElementById('land-status');
-const $keyCapture1  = document.getElementById('key-capture-1');
-const $keyCapture2  = document.getElementById('key-capture-2');
-const $keyHex1      = document.getElementById('key-hex-1');
-const $keyHex2      = document.getElementById('key-hex-2');
-const $rateSlider   = document.getElementById('rate-slider');
-const $debounce     = document.getElementById('debounce-input');
-const $statConn     = document.getElementById('stat-conn');
-const $statLast     = document.getElementById('stat-last');
-const $statLastHex  = document.getElementById('stat-last-hex');
-const $statAck      = document.getElementById('stat-ack');
-const $statKey1     = document.getElementById('stat-key1');
-const $statKey2     = document.getElementById('stat-key2');
-const $toast        = document.getElementById('toast');
+// ── Protocol constants ────────────────────────────────────────────────────────
+const CMD_SET_KEY1      = 0x01;
+const CMD_SET_RATE      = 0x02;
+const CMD_SET_DEBOUNCE  = 0x03;
+const CMD_SET_MACRO_CNT = 0x04;
+const CMD_SET_MACRO_0   = 0x05;
+const CMD_SET_MACRO_1   = 0x06;
+const CMD_SET_MACRO_2   = 0x07;
+const CMD_SET_MACRO_3   = 0x08;
+const CMD_SET_LED_MODE  = 0x10;
+const CMD_SET_LED_BRI   = 0x11;
+const CMD_SET_LED_SPD   = 0x12;
+const CMD_SET_LED_R     = 0x13;
+const CMD_SET_LED_G     = 0x14;
+const CMD_SET_LED_B     = 0x15;
+const CMD_DUMP          = 0xFF;
+const RESP_ACK          = 0xAA;
+const RESP_NACK         = 0xEE;
+const RESP_DUMP         = 0xFE;
 
-// ── Serial API check ──────────────────────────────────────
+// ── App state ─────────────────────────────────────────────────────────────────
+let port = null, writer = null, readLoop = null;
+let rxBuf = [];
+
+let capturedKey1 = null;          // { code, name, byte }
+let capturedMacro = null;         // array of bytes e.g. [0x80, 0x63] for Ctrl+C
+
+// Key 1 capture
+let listeningKey1 = false;
+
+// Key 2 chord capture
+let listeningKey2   = false;
+let macroDownCodes  = new Set();   // currently held browser codes
+let macroPressedCodes = new Set(); // all codes pressed this session
+let macroCommitTimer  = null;
+
+// LED state (mirrors what's on device)
+let ledMode = 1, ledBri = 200, ledSpd = 20, ledR = 255, ledG = 0, ledB = 0;
+
+// ── DOM refs ──────────────────────────────────────────────────────────────────
+const $landing    = document.getElementById('landing');
+const $config     = document.getElementById('config');
+const $btnConnect = document.getElementById('btn-connect');
+const $btnDisconn = document.getElementById('btn-disconnect');
+const $btnSave    = document.getElementById('btn-save');
+const $btnTest    = document.getElementById('btn-test');
+const $btnPreview = document.getElementById('btn-preview');
+const $landDot    = document.getElementById('land-dot');
+const $landStatus = document.getElementById('land-status');
+const $kc1        = document.getElementById('key-capture-1');
+const $kc2        = document.getElementById('key-capture-2');
+const $khex1      = document.getElementById('key-hex-1');
+const $khex2      = document.getElementById('key-hex-2');
+const $rateSlider = document.getElementById('rate-slider');
+const $debInput   = document.getElementById('debounce-input');
+const $statConn   = document.getElementById('stat-conn');
+const $statLast   = document.getElementById('stat-last');
+const $statLastHex= document.getElementById('stat-last-hex');
+const $statAck    = document.getElementById('stat-ack');
+const $statKey1   = document.getElementById('stat-key1');
+const $statKey2   = document.getElementById('stat-key2');
+const $toast      = document.getElementById('toast');
+const $ledBri     = document.getElementById('led-bri');
+const $ledSpd     = document.getElementById('led-spd');
+const $ledR       = document.getElementById('led-r');
+const $ledG       = document.getElementById('led-g');
+const $ledB       = document.getElementById('led-b');
+const $ledBriVal  = document.getElementById('led-bri-val');
+const $ledSpdVal  = document.getElementById('led-spd-val');
+const $ledRVal    = document.getElementById('led-r-val');
+const $ledGVal    = document.getElementById('led-g-val');
+const $ledBVal    = document.getElementById('led-b-val');
+const $swatch     = document.getElementById('color-swatch');
+
+// ── Serial API check ──────────────────────────────────────────────────────────
 if (!('serial' in navigator)) {
   document.getElementById('no-serial-warning').style.display = '';
   $btnConnect.disabled = true;
 }
 
-// ── Toast ─────────────────────────────────────────────────
+// ── Toast ─────────────────────────────────────────────────────────────────────
 let _toastTimer = null;
-function toast(msg, type = 'ok', duration = 2500) {
+function toast(msg, type='ok', dur=2500) {
   clearTimeout(_toastTimer);
   $toast.textContent = msg;
   $toast.className   = `show ${type}`;
-  _toastTimer = setTimeout(() => { $toast.className = ''; }, duration);
+  _toastTimer = setTimeout(() => { $toast.className = ''; }, dur);
 }
 
-// ── Screen transitions ────────────────────────────────────
+// ── Screen transitions ────────────────────────────────────────────────────────
 function showConfig()  { $landing.classList.add('hidden'); $config.classList.remove('hidden'); }
 function showLanding() { $config.classList.add('hidden'); $landing.classList.remove('hidden'); }
 
-// ── Serial write helper ───────────────────────────────────
+// ── Serial helpers ────────────────────────────────────────────────────────────
 async function sendBytes(...bytes) {
   if (!writer) return;
   try {
     await writer.write(new Uint8Array(bytes));
-    $statLastHex.textContent = bytes.map(b => '0x' + b.toString(16).padStart(2,'0').toUpperCase()).join(' ');
-  } catch(e) {
-    toast('Write error: ' + e.message, 'err');
-  }
+    $statLastHex.textContent = bytes.map(b => '0x'+b.toString(16).padStart(2,'0').toUpperCase()).join(' ');
+  } catch(e) { toast('Write error: '+e.message,'err'); }
 }
-
 function updateStatLast(label) { $statLast.textContent = label; }
 
-// ── Non-blocking read loop ────────────────────────────────
+// ── Read loop ─────────────────────────────────────────────────────────────────
 async function startReadLoop() {
   const reader = port.readable.getReader();
   readLoop = reader;
@@ -679,295 +716,404 @@ async function startReadLoop() {
       if (done) break;
       for (const b of value) processRxByte(b);
     }
-  } catch(_) {
-    // Port closed or device unplugged — handled in disconnect()
-  } finally {
-    reader.releaseLock();
-  }
+  } catch(_) {}
+  finally { reader.releaseLock(); }
 }
 
-// ── RX byte processor ─────────────────────────────────────
-// Handles: 0xAA (ACK), 0xEE (NACK), 0xFE + 5 bytes (dump).
+// ── RX processor ──────────────────────────────────────────────────────────────
+// Dump format: 0xFE + 15 data bytes + 1 padding = 16 bytes total
 function processRxByte(b) {
   if (rxBuf.length === 0) {
     if (b === RESP_ACK) {
-      $statAck.textContent = 'ACK';
-      $statAck.className   = 'ok';
+      $statAck.textContent = 'ACK'; $statAck.className = 'stat-sub ok';
     } else if (b === RESP_NACK) {
-      $statAck.textContent = 'NACK';
-      $statAck.className   = 'err';
-      toast('Device rejected command', 'err');
+      $statAck.textContent = 'NACK'; $statAck.className = 'stat-sub err';
+      toast('Device rejected command','err');
     } else if (b === RESP_DUMP) {
       rxBuf.push(b);
     }
   } else if (rxBuf[0] === RESP_DUMP) {
     rxBuf.push(b);
-    if (rxBuf.length === 6) {   // 0xFE + 5 data bytes
-      // [0xFE, key1, key2, rateId, debounceMs, padding]
-      applyDump(rxBuf[1], rxBuf[2], rxBuf[3], rxBuf[4]);
+    if (rxBuf.length === 16) {  // 0xFE + 15 data bytes
+      // [0xFE, k1, mCnt, mk0, mk1, mk2, mk3, rate, deb, lMode, lBri, lSpd, lR, lG, lB, pad]
+      applyDump(rxBuf[1], rxBuf[2], rxBuf[3], rxBuf[4], rxBuf[5], rxBuf[6],
+                rxBuf[7], rxBuf[8], rxBuf[9], rxBuf[10], rxBuf[11], rxBuf[12], rxBuf[13], rxBuf[14]);
       rxBuf = [];
     }
   }
 }
 
-// ── Apply config dump from device ────────────────────────
-function applyDump(key1Byte, key2Byte, rateId, debounceMs) {
+// ── Apply dump ────────────────────────────────────────────────────────────────
+function applyDump(key1b, mCnt, mk0, mk1, mk2, mk3, rateId, debMs,
+                   lMode, lBri, lSpd, lRed, lGrn, lBlu) {
   // Key 1
-  const e1 = Object.entries(KEY_MAP).find(([,v]) => v === key1Byte);
+  const e1 = Object.entries(KEY_MAP).find(([,v]) => v === key1b);
   capturedKey1 = e1
-    ? { code: e1[0], name: e1[0].replace(/^Key|^Digit/, ''), byte: key1Byte }
-    : { code: '', name: `0x${key1Byte.toString(16).toUpperCase()}`, byte: key1Byte };
+    ? { code: e1[0], name: e1[0].replace(/^Key|^Digit/, ''), byte: key1b }
+    : { code: '', name: byteToName(key1b), byte: key1b };
   renderKey1();
 
-  // Key 2
-  const e2 = Object.entries(KEY_MAP).find(([,v]) => v === key2Byte);
-  capturedKey2 = e2
-    ? { code: e2[0], name: e2[0].replace(/^Key|^Digit/, ''), byte: key2Byte }
-    : { code: '', name: `0x${key2Byte.toString(16).toUpperCase()}`, byte: key2Byte };
-  renderKey2();
+  // Key 2 macro
+  const count = Math.max(1, Math.min(4, mCnt));
+  const slots  = [mk0, mk1, mk2, mk3];
+  capturedMacro = slots.slice(0, count).filter(b => b !== 0);
+  if (capturedMacro.length === 0) capturedMacro = [mk0];
+  renderMacro();
 
+  // Rate & lockout
   $rateSlider.value = Math.min(6, Math.max(0, rateId));
-  $debounce.value   = Math.min(10, Math.max(0, debounceMs));
-
+  $debInput.value   = Math.min(10, Math.max(0, debMs));
   updateRateLabels();
   updateDebounceHints();
 
-  // Flash the active rate label on load
-  const activeEl = document.getElementById(`rl-${$rateSlider.value}`);
-  if (activeEl) {
-    activeEl.classList.remove('rate-label-flash');
-    void activeEl.offsetWidth;
-    activeEl.classList.add('rate-label-flash');
-    setTimeout(() => activeEl.classList.remove('rate-label-flash'), 750);
+  // Flash rate label
+  const el = document.getElementById(`rl-${$rateSlider.value}`);
+  if (el) {
+    el.classList.remove('rate-label-flash'); void el.offsetWidth;
+    el.classList.add('rate-label-flash');
+    setTimeout(() => el.classList.remove('rate-label-flash'), 750);
   }
 
-  toast('Config loaded from device', 'ok');
+  // LED
+  ledMode = lMode; ledBri = lBri; ledSpd = Math.max(1, lSpd);
+  ledR = lRed; ledG = lGrn; ledB = lBlu;
+  applyLedToUI();
+
+  toast('Config loaded from device','ok');
 }
 
-// ── Render key capture boxes ──────────────────────────────
+// ── Key 1 render ──────────────────────────────────────────────────────────────
 function renderKey1() {
   if (!capturedKey1) return;
-  $keyCapture1.innerHTML = `<strong>${capturedKey1.name}</strong>`;
-  $keyHex1.textContent   = `HEX: 0x${capturedKey1.byte.toString(16).padStart(2,'0').toUpperCase()} · ${capturedKey1.code}`;
-  $statKey1.textContent  = capturedKey1.name;
+  $kc1.innerHTML    = `<strong>${capturedKey1.name}</strong>`;
+  $khex1.textContent = `HEX: 0x${capturedKey1.byte.toString(16).padStart(2,'0').toUpperCase()} · ${capturedKey1.code}`;
+  $statKey1.textContent = capturedKey1.name;
 }
 
-function renderKey2() {
-  if (!capturedKey2) return;
-  $keyCapture2.innerHTML = `<strong>${capturedKey2.name}</strong>`;
-  $keyHex2.textContent   = `HEX: 0x${capturedKey2.byte.toString(16).padStart(2,'0').toUpperCase()} · ${capturedKey2.code}`;
-  $statKey2.textContent  = capturedKey2.name;
+// ── Key 2 macro render ────────────────────────────────────────────────────────
+function renderMacro() {
+  if (!capturedMacro || capturedMacro.length === 0) return;
+  const names = capturedMacro.map(byteToName);
+  // Build chord display
+  const parts = [];
+  names.forEach((n, i) => {
+    if (i > 0) parts.push('<span class="chord-plus">+</span>');
+    parts.push(`<span class="chord-key">${n}</span>`);
+  });
+  $kc2.innerHTML = `<div class="chord-display">${parts.join('')}</div>`;
+  $khex2.textContent = 'MACRO: [' + capturedMacro.map(b => '0x'+b.toString(16).padStart(2,'0').toUpperCase()).join(', ') + ']';
+  $statKey2.textContent = names.join('+');
 }
 
-// ── Key capture — shared handler for both boxes ───────────
-// listeningBox prevents both from listening simultaneously.
-function startListening(boxIdx) {
-  if (listeningBox !== -1) return;
-  listeningBox = boxIdx;
-  const el = boxIdx === 0 ? $keyCapture1 : $keyCapture2;
-  el.classList.add('listening');
-  el.innerHTML = '<span>Press any key…</span>';
-  window.addEventListener('keydown', onKeyCaptured, { once: true });
-}
+// ── Key 1 capture ─────────────────────────────────────────────────────────────
+$kc1.addEventListener('click', () => {
+  if (listeningKey1 || listeningKey2) return;
+  listeningKey1 = true;
+  $kc1.classList.add('listening');
+  $kc1.innerHTML = '<span>Press any key…</span>';
+  window.addEventListener('keydown', onKey1Captured, { once: true });
+});
 
-function onKeyCaptured(e) {
-  e.preventDefault();
-  e.stopPropagation();
-  const boxIdx = listeningBox;
-  listeningBox = -1;
-
-  const el = boxIdx === 0 ? $keyCapture1 : $keyCapture2;
-  el.classList.remove('listening');
-
-  const code = e.code || '';
-  const byte = KEY_MAP[code];
-
+function onKey1Captured(e) {
+  e.preventDefault(); e.stopPropagation();
+  listeningKey1 = false;
+  $kc1.classList.remove('listening');
+  const byte = KEY_MAP[e.code || ''];
   if (byte === undefined) {
-    el.innerHTML = `<span class="hint">Unknown key (${code}) — try another</span>`;
-    if (boxIdx === 0) { $keyHex1.textContent = 'HEX: —'; capturedKey1 = null; }
-    else              { $keyHex2.textContent = 'HEX: —'; capturedKey2 = null; }
-    return;
+    $kc1.innerHTML = `<span class="hint">Unknown (${e.code}) — try another</span>`;
+    capturedKey1 = null; $khex1.textContent = 'HEX: —'; return;
   }
-
   let name = e.key;
   if (name.length === 1) name = name.toUpperCase();
-  const captured = { code, name, byte };
-
-  if (boxIdx === 0) { capturedKey1 = captured; renderKey1(); }
-  else              { capturedKey2 = captured; renderKey2(); }
+  capturedKey1 = { code: e.code, name, byte };
+  renderKey1();
 }
 
-$keyCapture1.addEventListener('click', () => startListening(0));
-$keyCapture2.addEventListener('click', () => startListening(1));
+// ── Key 2 chord capture ───────────────────────────────────────────────────────
+$kc2.addEventListener('click', () => {
+  if (listeningKey1 || listeningKey2) return;
+  listeningKey2 = true;
+  macroDownCodes.clear();
+  macroPressedCodes.clear();
+  clearTimeout(macroCommitTimer);
+  $kc2.classList.add('listening');
+  $kc2.innerHTML = '<span>Hold combo, then release all…</span>';
+  window.addEventListener('keydown', onMacroKeyDown);
+  window.addEventListener('keyup',   onMacroKeyUp);
+});
 
-// ── Connect ───────────────────────────────────────────────
+function onMacroKeyDown(e) {
+  e.preventDefault();
+  macroDownCodes.add(e.code);
+  macroPressedCodes.add(e.code);
+  clearTimeout(macroCommitTimer);
+  // Live feedback: show keys as they're pressed
+  const held = [...macroPressedCodes].map(c => {
+    const b = KEY_MAP[c]; return b !== undefined ? byteToName(b) : null;
+  }).filter(Boolean);
+  if (held.length) {
+    const parts = held.map((n,i) => (i>0?'<span class="chord-plus">+</span>':'')+`<span class="chord-key">${n}</span>`).join('');
+    $kc2.innerHTML = `<div class="chord-display">${parts}</div>`;
+  }
+}
+
+function onMacroKeyUp(e) {
+  e.preventDefault();
+  macroDownCodes.delete(e.code);
+  if (macroDownCodes.size === 0 && macroPressedCodes.size > 0) {
+    // All keys released — commit after short settling delay
+    macroCommitTimer = setTimeout(commitMacro, 120);
+  }
+}
+
+function commitMacro() {
+  window.removeEventListener('keydown', onMacroKeyDown);
+  window.removeEventListener('keyup',   onMacroKeyUp);
+  listeningKey2 = false;
+  $kc2.classList.remove('listening');
+
+  // Convert codes to Arduino bytes, sort modifiers first
+  let bytes = [];
+  for (const code of macroPressedCodes) {
+    const b = KEY_MAP[code];
+    if (b !== undefined) bytes.push(b);
+  }
+  bytes = bytes.sort((a, b) => (a >= 0x80 ? 0 : 1) - (b >= 0x80 ? 0 : 1));
+  bytes = bytes.slice(0, 4);
+
+  if (bytes.length === 0) {
+    $kc2.innerHTML = '<span class="hint">Unknown keys — try again</span>';
+    capturedMacro = null; $khex2.textContent = 'MACRO: —'; return;
+  }
+
+  capturedMacro = bytes;
+  renderMacro();
+}
+
+// ── LED UI ────────────────────────────────────────────────────────────────────
+function applyLedToUI() {
+  // Mode buttons
+  document.querySelectorAll('.led-mode-btn').forEach(btn => {
+    btn.classList.toggle('active', parseInt(btn.dataset.mode) === ledMode);
+  });
+  // Sliders
+  $ledBri.value = ledBri; $ledBriVal.textContent = ledBri;
+  $ledSpd.value = ledSpd; $ledSpdVal.textContent = ledSpd + 'ms';
+  $ledR.value   = ledR;   $ledRVal.textContent   = ledR;
+  $ledG.value   = ledG;   $ledGVal.textContent   = ledG;
+  $ledB.value   = ledB;   $ledBVal.textContent   = ledB;
+  updateSwatch();
+  updateLedColorVisibility();
+}
+
+function updateSwatch() {
+  $swatch.style.background = `rgb(${ledR},${ledG},${ledB})`;
+  $swatch.style.boxShadow  = `0 0 14px rgba(${ledR},${ledG},${ledB},0.5)`;
+}
+
+function updateLedColorVisibility() {
+  const show = LED_USES_COLOR.has(ledMode);
+  document.getElementById('led-sep').style.display          = show ? '' : 'none';
+  document.getElementById('led-color-section').style.display = show ? '' : 'none';
+}
+
+// Mode buttons
+document.querySelectorAll('.led-mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    ledMode = parseInt(btn.dataset.mode);
+    document.querySelectorAll('.led-mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    updateLedColorVisibility();
+  });
+});
+
+// Sliders
+$ledBri.addEventListener('input', () => { ledBri = +$ledBri.value; $ledBriVal.textContent = ledBri; });
+$ledSpd.addEventListener('input', () => { ledSpd = +$ledSpd.value; $ledSpdVal.textContent = ledSpd + 'ms'; });
+$ledR.addEventListener('input',   () => { ledR   = +$ledR.value;   $ledRVal.textContent   = ledR; updateSwatch(); });
+$ledG.addEventListener('input',   () => { ledG   = +$ledG.value;   $ledGVal.textContent   = ledG; updateSwatch(); });
+$ledB.addEventListener('input',   () => { ledB   = +$ledB.value;   $ledBVal.textContent   = ledB; updateSwatch(); });
+
+// ── Connect ───────────────────────────────────────────────────────────────────
 $btnConnect.addEventListener('click', async () => {
   try {
     $btnConnect.disabled = true;
     $landStatus.textContent = 'Requesting port…';
-
     port = await navigator.serial.requestPort({
       filters: [
-        { usbVendorId: 0x2E8A },   // Raspberry Pi / RP2040
-        { usbVendorId: 0x2341 },   // Arduino
-        { usbVendorId: 0x1B4F },   // SparkFun
-        { usbVendorId: 0x03EB },   // Atmel
+        { usbVendorId: 0x2E8A },
+        { usbVendorId: 0x2341 },
+        { usbVendorId: 0x1B4F },
+        { usbVendorId: 0x03EB },
       ]
     });
-
     await port.open({ baudRate: 9600, dataBits: 8, stopBits: 1, parity: 'none' });
-
     writer = port.writable.getWriter();
-    $landDot.className    = 'dot ok';
+    $landDot.className   = 'dot ok';
     $landStatus.textContent = 'Connected';
     $statConn.textContent = 'LIVE';
     $statConn.className   = 'stat-val ok';
     $btnTest.disabled     = false;
-
+    $btnPreview.disabled  = false;
     startReadLoop();
     showConfig();
-
     setTimeout(() => sendBytes(CMD_DUMP), 300);
-
   } catch(e) {
     $btnConnect.disabled = false;
     $landDot.className   = 'dot err';
     if (e.name !== 'NotFoundError') {
       $landStatus.textContent = 'Error: ' + e.message;
-      toast('Connection failed: ' + e.message, 'err', 4000);
+      toast('Connection failed: '+e.message,'err',4000);
     } else {
       $landStatus.textContent = 'Disconnected';
     }
   }
 });
 
-// ── Disconnect ────────────────────────────────────────────
+// ── Disconnect ────────────────────────────────────────────────────────────────
 async function disconnect() {
   try {
-    if (readLoop)  { try { readLoop.cancel(); }      catch(_) {} readLoop = null; }
-    if (writer)    { try { writer.releaseLock(); }   catch(_) {} writer   = null; }
-    if (port)      { try { await port.close(); }     catch(_) {} port     = null; }
+    if (readLoop) { try { readLoop.cancel(); }     catch(_){} readLoop = null; }
+    if (writer)   { try { writer.releaseLock(); }  catch(_){} writer   = null; }
+    if (port)     { try { await port.close(); }    catch(_){} port     = null; }
   } finally {
-    $landDot.className      = 'dot';
+    $landDot.className   = 'dot';
     $landStatus.textContent = 'Disconnected';
-    $btnConnect.disabled    = false;
-    $btnTest.disabled       = true;
-    $statConn.textContent   = 'OFFLINE';
-    $statConn.className     = 'stat-val err';
+    $btnConnect.disabled = false;
+    $btnTest.disabled    = true;
+    $btnPreview.disabled = true;
+    $statConn.textContent = 'OFFLINE';
+    $statConn.className   = 'stat-val err';
     showLanding();
   }
 }
+$btnDisconn.addEventListener('click', disconnect);
 
-$btnDisconn.addEventListener('click', () => disconnect());
-
-// ── Test / ping button ────────────────────────────────────
+// ── Test / ping ───────────────────────────────────────────────────────────────
 $btnTest.addEventListener('click', async () => {
-  if (!port || !writer) { toast('Not connected', 'err'); return; }
+  if (!writer) { toast('Not connected','err'); return; }
   $btnTest.disabled = true;
   updateStatLast('PING');
   await sendBytes(CMD_DUMP);
   setTimeout(() => { $btnTest.disabled = false; }, 400);
 });
 
-// ── Save to Device ────────────────────────────────────────
-$btnSave.addEventListener('click', async () => {
-  if (!port || !writer) { toast('Not connected', 'err'); return; }
-  $btnSave.disabled = true;
+// ── LED Preview ───────────────────────────────────────────────────────────────
+$btnPreview.addEventListener('click', async () => {
+  if (!writer) { toast('Not connected','err'); return; }
+  $btnPreview.disabled = true;
+  updateStatLast('LED PREVIEW');
+  await sendBytes(CMD_SET_LED_MODE, ledMode);   await delay(50);
+  await sendBytes(CMD_SET_LED_BRI,  ledBri);    await delay(50);
+  await sendBytes(CMD_SET_LED_SPD,  ledSpd);    await delay(50);
+  await sendBytes(CMD_SET_LED_R,    ledR);       await delay(50);
+  await sendBytes(CMD_SET_LED_G,    ledG);       await delay(50);
+  await sendBytes(CMD_SET_LED_B,    ledB);       await delay(50);
+  toast('LED preview sent','ok');
+  $btnPreview.disabled = false;
+});
 
+// ── Save to Device ────────────────────────────────────────────────────────────
+$btnSave.addEventListener('click', async () => {
+  if (!writer) { toast('Not connected','err'); return; }
+  $btnSave.disabled = true;
   try {
     let sent = 0;
 
+    // Key 1
     if (capturedKey1) {
       updateStatLast(`KEY1: ${capturedKey1.name}`);
-      await sendBytes(CMD_SET_KEY1, capturedKey1.byte);
-      await delay(60);
+      await sendBytes(CMD_SET_KEY1, capturedKey1.byte); await delay(60); sent++;
+    }
+
+    // Key 2 macro
+    if (capturedMacro && capturedMacro.length > 0) {
+      const count = Math.min(4, capturedMacro.length);
+      updateStatLast(`MACRO (${count} key${count>1?'s':''})`);
+      await sendBytes(CMD_SET_MACRO_CNT, count); await delay(60);
+      const slots = [CMD_SET_MACRO_0, CMD_SET_MACRO_1, CMD_SET_MACRO_2, CMD_SET_MACRO_3];
+      for (let i = 0; i < 4; i++) {
+        await sendBytes(slots[i], i < count ? capturedMacro[i] : 0x00);
+        await delay(60);
+      }
       sent++;
     }
 
-    if (capturedKey2) {
-      updateStatLast(`KEY2: ${capturedKey2.name}`);
-      await sendBytes(CMD_SET_KEY2, capturedKey2.byte);
-      await delay(60);
-      sent++;
-    }
-
+    // Rate
     const rateId = parseInt($rateSlider.value, 10);
     updateStatLast(`RATE: ${RATE_HZ[rateId]}`);
-    await sendBytes(CMD_SET_RATE, rateId);
-    await delay(60);
-    sent++;
+    await sendBytes(CMD_SET_RATE, rateId); await delay(60); sent++;
 
-    let deb = parseInt($debounce.value, 10);
+    // Lockout
+    let deb = parseInt($debInput.value, 10);
     if (isNaN(deb) || deb < 0) deb = 0;
     if (deb > 10) deb = 10;
-    $debounce.value = deb;
-    updateStatLast(`DEB: ${deb}ms`);
-    await sendBytes(CMD_SET_DEBOUNCE, deb);
-    await delay(60);
+    $debInput.value = deb;
+    updateStatLast(`LOCKOUT: ${deb}ms`);
+    await sendBytes(CMD_SET_DEBOUNCE, deb); await delay(60); sent++;
+
+    // LED
+    updateStatLast('LED settings');
+    await sendBytes(CMD_SET_LED_MODE, ledMode); await delay(60);
+    await sendBytes(CMD_SET_LED_BRI,  ledBri);  await delay(60);
+    await sendBytes(CMD_SET_LED_SPD,  ledSpd);  await delay(60);
+    await sendBytes(CMD_SET_LED_R,    ledR);     await delay(60);
+    await sendBytes(CMD_SET_LED_G,    ledG);     await delay(60);
+    await sendBytes(CMD_SET_LED_B,    ledB);     await delay(60);
     sent++;
 
-    toast(`Saved ${sent} setting(s) ✓`, 'ok');
+    toast(`Saved ${sent} setting group(s) ✓`, 'ok');
   } catch(e) {
-    toast('Save failed: ' + e.message, 'err');
+    toast('Save failed: '+e.message,'err');
   } finally {
     $btnSave.disabled = false;
   }
 });
 
-// ── Rate label highlight + HIGH PERFORMANCE badge ─────────
+// ── Rate labels + badge ───────────────────────────────────────────────────────
 function updateRateLabels() {
   const idx = parseInt($rateSlider.value, 10);
   for (let i = 0; i <= 6; i++) {
     const el = document.getElementById(`rl-${i}`);
     if (el) el.className = i === idx ? 'rate-label-active' : '';
   }
-  // Show badge at 4000 Hz (idx 5) and 8000 Hz (idx 6)
   const badge = document.getElementById('rate-perf-badge');
   if (badge) badge.className = idx >= 5 ? 'visible' : '';
 }
 
-// ── Debounce warning + instant hint ──────────────────────
-// Warns at exactly 1000 Hz (rateId=3) and above (rateIds 4–6).
-// Uses different text for "above 1000 Hz" to reflect RP2040 scan-rate context.
+// ── Debounce hints ────────────────────────────────────────────────────────────
 function updateDebounceHints() {
   const rate = parseInt($rateSlider.value, 10);
-  const deb  = parseInt($debounce.value, 10) || 0;
+  const deb  = parseInt($debInput.value, 10) || 0;
   const warn = document.getElementById('debounce-warn');
-
   if (deb === 0) {
-    warn.style.display = 'none';
-    warn.textContent   = '';
+    warn.style.display = 'none'; warn.textContent = '';
   } else if (rate === 3) {
     warn.style.display = 'block';
-    warn.textContent   = '⚠ Debounce > 0ms reduces effective polling rate';
+    warn.textContent   = '⚠ Lockout > 0ms reduces effective polling rate';
   } else if (rate >= 4) {
     warn.style.display = 'block';
-    warn.textContent   = '⚠ Debounce adds latency at high polling rates';
+    warn.textContent   = '⚠ Lockout adds latency at high polling rates';
   } else {
-    warn.style.display = 'none';
-    warn.textContent   = '';
+    warn.style.display = 'none'; warn.textContent = '';
   }
-
-  document.getElementById('debounce-hint').textContent = deb === 0 ? '(instant)' : '';
+  document.getElementById('debounce-hint').textContent = deb === 0 ? '(raw, no protection)' : '';
 }
 
 $rateSlider.addEventListener('input', () => { updateRateLabels(); updateDebounceHints(); });
-$debounce.addEventListener('input', updateDebounceHints);
+$debInput.addEventListener('input', updateDebounceHints);
 
-// ── Utility ───────────────────────────────────────────────
-function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+// ── Utility ───────────────────────────────────────────────────────────────────
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// Detect unexpected port disconnect
 setInterval(() => {
-  if (port && !port.readable) {
-    toast('Device disconnected', 'warn', 4000);
-    disconnect();
-  }
+  if (port && !port.readable) { toast('Device disconnected','warn',4000); disconnect(); }
 }, 2000);
 
-// ── Initial UI state ──────────────────────────────────────
+// ── Init ──────────────────────────────────────────────────────────────────────
 updateRateLabels();
 updateDebounceHints();
+applyLedToUI();
 </script>
 </body>
 </html>
